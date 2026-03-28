@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SkyWave — Florida Live Tower Map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  
+  :root {
+    --sky-green: #00e676;
+    --sky-dark: #0a0e17;
+    --sky-panel: #111827;
+    --sky-border: #1e293b;
+    --sky-text: #e2e8f0;
+    --sky-dim: #64748b;
+    --sky-orange: #ff628c;
+    --lte-color: #00e676;
+    --gsm-color: #fbbf24;
+    --umts-color: #60a5fa;
+    --cdma-color: #f472b6;
+    --nr-color: #c084fc;
+  }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--sky-dark);
+    color: var(--sky-text);
+    overflow: hidden;
+    height: 100vh;
+  }
+
+  #map {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 1;
+  }
+
+  /* Dark map tiles */
+  .leaflet-tile-pane { filter: saturate(0.7) brightness(0.85); }
+  .leaflet-control-zoom a {
+    background: var(--sky-panel) !important;
+    color: var(--sky-text) !important;
+    border-color: var(--sky-border) !important;
+  }
+  .leaflet-control-attribution { display: none; }
+
+  /* Header bar */
+  #header {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 56px;
+    background: linear-gradient(135deg, var(--sky-dark) 0%, #111827 100%);
+    border-bottom: 1px solid var(--sky-border);
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    z-index: 1000;
+    backdrop-filter: blur(12px);
+  }
+
+  #header .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  #header .logo-icon {
+    width: 32px; height: 32px;
+    background: var(--sky-green);
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+  }
+
+  #header .logo-text {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 16px;
+    color: #fff;
+    letter-spacing: 1px;
+  }
+
+  #header .logo-sub {
+    font-size: 11px;
+    color: var(--sky-dim);
+    font-weight: 400;
+    letter-spacing: 0.5px;
+  }
+
+  /* Stats bar */
+  #stats {
+    position: fixed;
+    top: 56px; left: 0; right: 0;
+    height: 40px;
+    background: rgba(17, 24, 39, 0.92);
+    border-bottom: 1px solid var(--sky-border);
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    gap: 24px;
+    z-index: 1000;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    backdrop-filter: blur(8px);
+  }
+
+  .stat {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--sky-dim);
+  }
+
+  .stat .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+
+  .stat .val {
+    color: var(--sky-text);
+    font-weight: 600;
+  }
+
+  #loading-indicator {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--sky-green);
+  }
+
+  #loading-indicator .spinner {
+    width: 12px; height: 12px;
+    border: 2px solid transparent;
+    border-top-color: var(--sky-green);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  #loading-indicator.hidden { display: none; }
+
+  /* Legend */
+  #legend {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    background: rgba(17, 24, 39, 0.94);
+    border: 1px solid var(--sky-border);
+    border-radius: 10px;
+    padding: 14px 18px;
+    z-index: 1000;
+    font-size: 12px;
+    backdrop-filter: blur(8px);
+  }
+
+  #legend h4 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--sky-dim);
+    margin-bottom: 10px;
+  }
+
+  .legend-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 5px;
+  }
+
+  .legend-marker {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    border: 2px solid;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  .legend-label { color: var(--sky-text); font-size: 12px; }
+
+  /* Zoom prompt */
+  #zoom-prompt {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(17, 24, 39, 0.95);
+    border: 1px solid var(--sky-border);
+    border-radius: 12px;
+    padding: 24px 32px;
+    text-align: center;
+    z-index: 1000;
+    font-family: 'JetBrains Mono', monospace;
+    backdrop-filter: blur(10px);
+  }
+
+  #zoom-prompt.hidden { display: none; }
+  #zoom-prompt .icon { font-size: 32px; margin-bottom: 8px; }
+  #zoom-prompt .msg { font-size: 13px; color: var(--sky-dim); }
+  #zoom-prompt .msg strong { color: var(--sky-green); }
+
+  /* Custom popup */
+  .leaflet-popup-content-wrapper {
+    background: var(--sky-panel) !important;
+    border: 1px solid var(--sky-border) !important;
+    border-radius: 10px !important;
+    color: var(--sky-text) !important;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5) !important;
+  }
+  .leaflet-popup-tip { background: var(--sky-panel) !important; }
+  .leaflet-popup-content { margin: 14px 16px !important; font-size: 13px; min-width: 220px; }
+
+  .popup-header {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 13px;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .popup-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+  }
+
+  .popup-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 3px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    font-size: 12px;
+  }
+
+  .popup-row .label { color: var(--sky-dim); }
+  .popup-row .value { font-family: 'JetBrains Mono', monospace; font-weight: 600; }
+
+  /* Cluster styles */
+  .marker-cluster-small {
+    background-color: rgba(0, 230, 118, 0.3) !important;
+  }
+  .marker-cluster-small div {
+    background-color: rgba(0, 230, 118, 0.7) !important;
+    color: #000 !important;
+    font-family: 'JetBrains Mono', monospace !important;
+    font-weight: 700 !important;
+  }
+  .marker-cluster-medium {
+    background-color: rgba(251, 191, 36, 0.3) !important;
+  }
+  .marker-cluster-medium div {
+    background-color: rgba(251, 191, 36, 0.7) !important;
+    color: #000 !important;
+    font-family: 'JetBrains Mono', monospace !important;
+    font-weight: 700 !important;
+  }
+  .marker-cluster-large {
+    background-color: rgba(255, 98, 140, 0.3) !important;
+  }
+  .marker-cluster-large div {
+    background-color: rgba(255, 98, 140, 0.7) !important;
+    color: #000 !important;
+    font-family: 'JetBrains Mono', monospace !important;
+    font-weight: 700 !important;
+  }
+
+  /* Search box */
+  #search-box {
+    position: fixed;
+    top: 64px;
+    right: 20px;
+    z-index: 1000;
+  }
+
+  #search-input {
+    background: rgba(17, 24, 39, 0.94);
+    border: 1px solid var(--sky-border);
+    border-radius: 8px;
+    padding: 8px 14px 8px 34px;
+    color: var(--sky-text);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    width: 240px;
+    outline: none;
+    backdrop-filter: blur(8px);
+  }
+
+  #search-input::placeholder { color: var(--sky-dim); }
+  #search-input:focus { border-color: var(--sky-green); }
+
+  #search-icon {
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--sky-dim);
+    font-size: 14px;
+  }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div id="header">
+  <div class="logo">
+    <div class="logo-icon">🗼</div>
+    <div>
+      <div class="logo-text">SKYWAVE</div>
+      <div class="logo-sub">Florida Live Tower Map</div>
+    </div>
+  </div>
+</div>
+
+<!-- Stats bar -->
+<div id="stats">
+  <div class="stat">
+    <span class="dot" style="background:var(--lte-color)"></span>
+    LTE <span class="val" id="stat-lte">0</span>
+  </div>
+  <div class="stat">
+    <span class="dot" style="background:var(--gsm-color)"></span>
+    GSM <span class="val" id="stat-gsm">0</span>
+  </div>
+  <div class="stat">
+    <span class="dot" style="background:var(--umts-color)"></span>
+    UMTS <span class="val" id="stat-umts">0</span>
+  </div>
+  <div class="stat">
+    <span class="dot" style="background:var(--cdma-color)"></span>
+    CDMA <span class="val" id="stat-cdma">0</span>
+  </div>
+  <div class="stat">
+    <span class="dot" style="background:var(--nr-color)"></span>
+    5G NR <span class="val" id="stat-nr">0</span>
+  </div>
+  <div class="stat" style="margin-left:12px; border-left:1px solid var(--sky-border); padding-left:12px;">
+    TOTAL <span class="val" id="stat-total">0</span>
+  </div>
+  <div id="loading-indicator" class="hidden">
+    <div class="spinner"></div>
+    <span>Scanning...</span>
+  </div>
+</div>
+
+<!-- Zoom prompt -->
+<div id="zoom-prompt" class="hidden">
+  <div class="icon">🔍</div>
+  <div class="msg">Zoom in to <strong>level 13+</strong> to load tower data</div>
+</div>
+
+<!-- Legend -->
+<div id="legend">
+  <h4>Radio Type</h4>
+  <div class="legend-row">
+    <div class="legend-marker" style="background:var(--lte-color);border-color:var(--lte-color)"></div>
+    <span class="legend-label">LTE (4G)</span>
+  </div>
+  <div class="legend-row">
+    <div class="legend-marker" style="background:var(--nr-color);border-color:var(--nr-color)"></div>
+    <span class="legend-label">NR (5G)</span>
+  </div>
+  <div class="legend-row">
+    <div class="legend-marker" style="background:var(--umts-color);border-color:var(--umts-color)"></div>
+    <span class="legend-label">UMTS (3G)</span>
+  </div>
+  <div class="legend-row">
+    <div class="legend-marker" style="background:var(--gsm-color);border-color:var(--gsm-color)"></div>
+    <span class="legend-label">GSM (2G)</span>
+  </div>
+  <div class="legend-row">
+    <div class="legend-marker" style="background:var(--cdma-color);border-color:var(--cdma-color)"></div>
+    <span class="legend-label">CDMA</span>
+  </div>
+</div>
+
+<!-- Map -->
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script>
+(function() {
+  'use strict';
+
+  // ── Carrier Lookup ──
+  const CARRIERS = {
+    '310-260': 'T-Mobile',    '310-200': 'T-Mobile',     '310-210': 'T-Mobile',
+    '310-220': 'T-Mobile',    '310-230': 'T-Mobile',     '310-240': 'T-Mobile',
+    '310-250': 'T-Mobile',    '310-270': 'T-Mobile',     '310-300': 'T-Mobile',
+    '310-310': 'T-Mobile',    '310-490': 'T-Mobile',     '310-580': 'T-Mobile',
+    '310-660': 'T-Mobile',    '310-800': 'T-Mobile',     '312-250': 'T-Mobile',
+    '310-410': 'AT&T',        '310-070': 'AT&T',         '310-150': 'AT&T',
+    '310-170': 'AT&T',        '310-380': 'AT&T',         '310-560': 'AT&T',
+    '310-680': 'AT&T',        '310-980': 'AT&T',         '311-180': 'AT&T',
+    '310-120': 'Sprint/T-Mo', '311-490': 'Sprint/T-Mo',  '311-870': 'Sprint/T-Mo',
+    '311-940': 'T-Mobile',    '312-530': 'Sprint/T-Mo',
+    '311-480': 'Verizon',     '310-004': 'Verizon',      '310-010': 'Verizon',
+    '310-012': 'Verizon',     '310-013': 'Verizon',      '311-270': 'Verizon',
+    '311-280': 'Verizon',     '311-390': 'Verizon',      '311-480': 'Verizon',
+    '310-590': 'Verizon',
+    '311-580': 'US Cellular', '311-220': 'US Cellular',
+    '310-016': 'Cricket',     '310-090': 'Edge Wireless',
+    '310-053': 'GTEWC',       '310-340': 'Westlink',
+  };
+
+  function getCarrier(mcc, mnc) {
+    const key = `${mcc}-${String(mnc).padStart(3, '0')}`;
+    return CARRIERS[key] || CARRIERS[`${mcc}-${mnc}`] || `MCC:${mcc} MNC:${mnc}`;
+  }
+
+  // ── Radio colors ──
+  const RADIO_COLORS = {
+    'LTE':  '#00e676',
+    'GSM':  '#fbbf24',
+    'UMTS': '#60a5fa',
+    'CDMA': '#f472b6',
+    'NR':   '#c084fc',
+  };
+
+  function radioColor(radio) {
+    return RADIO_COLORS[radio] || '#94a3b8';
+  }
+
+  // ── Custom tower icon ──
+  function towerIcon(radio) {
+    const color = radioColor(radio);
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="36" viewBox="0 0 28 36">
+      <defs>
+        <filter id="glow-${radio}" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="2" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+      <!-- Pin body -->
+      <path d="M14 0C6.3 0 0 6.3 0 14c0 10.5 14 22 14 22s14-11.5 14-22C28 6.3 21.7 0 14 0z" 
+            fill="${color}" fill-opacity="0.9" filter="url(#glow-${radio})"/>
+      <path d="M14 1C7 1 1 7 1 14c0 9.8 13 20.5 13 20.5S27 23.8 27 14C27 7 21 1 14 1z" 
+            fill="${color}" fill-opacity="0.15"/>
+      <!-- Tower icon -->
+      <g transform="translate(14,14)" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round">
+        <line x1="0" y1="-7" x2="0" y2="5"/>
+        <line x1="-4" y1="5" x2="4" y2="5"/>
+        <line x1="-3" y1="1" x2="3" y2="1"/>
+        <line x1="-5" y1="-3" x2="-2" y2="-5"/>
+        <line x1="5" y1="-3" x2="2" y2="-5"/>
+        <!-- Signal waves -->
+        <path d="M-6,-6 A8,8 0 0,1 -2,-9" stroke-width="1" opacity="0.7"/>
+        <path d="M6,-6 A8,8 0 0,0 2,-9" stroke-width="1" opacity="0.7"/>
+      </g>
+      <!-- Center dot -->
+      <circle cx="14" cy="14" r="2.5" fill="#fff"/>
+    </svg>`;
+
+    return L.divIcon({
+      html: svg,
+      className: '',
+      iconSize: [28, 36],
+      iconAnchor: [14, 36],
+      popupAnchor: [0, -36]
+    });
+  }
+
+  // ── Init map ──
+  const map = L.map('map', {
+    center: [28.0, -82.0],
+    zoom: 7,
+    zoomControl: true,
+    minZoom: 6,
+    maxZoom: 18,
+  });
+
+  // Dark tile layer
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    maxZoom: 19,
+    subdomains: 'abcd',
+  }).addTo(map);
+
+  // Move zoom control to bottom right
+  map.zoomControl.setPosition('bottomright');
+
+  // Marker cluster group
+  const markers = L.markerClusterGroup({
+    maxClusterRadius: 50,
+    spiderfyOnMaxZoom: true,
+    showCoverageOnHover: false,
+    chunkedLoading: true,
+    disableClusteringAtZoom: 16,
+  });
+  map.addLayer(markers);
+
+  // ── State ──
+  let loadedCells = new Set();
+  let fetchAbort = null;
+  let stats = { LTE: 0, GSM: 0, UMTS: 0, CDMA: 0, NR: 0 };
+
+  const MIN_ZOOM = 12;
+  const MAX_PER_TILE = 200;
+
+  // ── UI helpers ──
+  function showLoading(on) {
+    document.getElementById('loading-indicator').classList.toggle('hidden', !on);
+  }
+
+  function showZoomPrompt(on) {
+    document.getElementById('zoom-prompt').classList.toggle('hidden', !on);
+  }
+
+  function updateStats() {
+    const total = Object.values(stats).reduce((a, b) => a + b, 0);
+    document.getElementById('stat-lte').textContent = stats.LTE.toLocaleString();
+    document.getElementById('stat-gsm').textContent = stats.GSM.toLocaleString();
+    document.getElementById('stat-umts').textContent = stats.UMTS.toLocaleString();
+    document.getElementById('stat-cdma').textContent = stats.CDMA.toLocaleString();
+    document.getElementById('stat-nr').textContent = stats.NR.toLocaleString();
+    document.getElementById('stat-total').textContent = total.toLocaleString();
+  }
+
+  // ── Popup content ──
+  function popupContent(cell) {
+    const carrier = getCarrier(cell.mcc, cell.mnc);
+    const radio = cell.radio || 'Unknown';
+    const color = radioColor(radio);
+    const rangeMi = cell.range ? (cell.range / 1609.34).toFixed(2) : '—';
+
+    return `
+      <div class="popup-header">
+        <span class="popup-badge" style="background:${color};color:#000">${radio}</span>
+        <span>${carrier}</span>
+      </div>
+      <div class="popup-row"><span class="label">Cell ID</span><span class="value">${cell.cellid}</span></div>
+      <div class="popup-row"><span class="label">LAC / TAC</span><span class="value">${cell.lac || cell.tac || '—'}</span></div>
+      <div class="popup-row"><span class="label">MCC / MNC</span><span class="value">${cell.mcc} / ${cell.mnc}</span></div>
+      <div class="popup-row"><span class="label">Range</span><span class="value">${rangeMi} mi (${cell.range || '—'}m)</span></div>
+      <div class="popup-row"><span class="label">Samples</span><span class="value">${cell.samples || '—'}</span></div>
+      <div class="popup-row"><span class="label">Signal</span><span class="value">${cell.averageSignalStrength || '—'} dBm</span></div>
+      <div class="popup-row"><span class="label">Coords</span><span class="value">${cell.lat.toFixed(5)}, ${cell.lon.toFixed(5)}</span></div>
+    `;
+  }
+
+  // ── Tile splitting for bbox limit ──
+  function splitBbox(bounds, maxSize) {
+    const s = bounds.getSouth(), w = bounds.getWest();
+    const n = bounds.getNorth(), e = bounds.getEast();
+    const latRange = n - s;
+    const lonRange = e - w;
+
+    // Approximate bbox size in meters
+    const latMeters = latRange * 111320;
+    const lonMeters = lonRange * 111320 * Math.cos((s + n) / 2 * Math.PI / 180);
+    const area = latMeters * lonMeters;
+
+    if (area <= maxSize) {
+      return [[s, w, n, e]];
+    }
+
+    // Split into tiles
+    const cols = Math.ceil(lonMeters / Math.sqrt(maxSize));
+    const rows = Math.ceil(latMeters / Math.sqrt(maxSize));
+    const dLat = latRange / rows;
+    const dLon = lonRange / cols;
+    const tiles = [];
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        tiles.push([
+          s + r * dLat,
+          w + c * dLon,
+          s + (r + 1) * dLat,
+          w + (c + 1) * dLon,
+        ]);
+      }
+    }
+    return tiles;
+  }
+
+  // ── Fetch towers for current view ──
+  async function loadTowers() {
+    if (fetchAbort) fetchAbort.abort();
+    fetchAbort = new AbortController();
+    const signal = fetchAbort.signal;
+
+    const zoom = map.getZoom();
+    if (zoom < MIN_ZOOM) {
+      showZoomPrompt(true);
+      return;
+    }
+    showZoomPrompt(false);
+    showLoading(true);
+
+    const bounds = map.getBounds();
+    const tiles = splitBbox(bounds, 3500000); // stay under 4M sq m limit
+
+    let newCount = 0;
+
+    for (const tile of tiles) {
+      if (signal.aborted) break;
+
+      const bbox = tile.join(',');
+      try {
+        // Get count first
+        const sizeResp = await fetch(`/api/opencellid/in-area-size?bbox=${bbox}`, { signal });
+        const sizeData = await sizeResp.json();
+        const count = sizeData.count || 0;
+
+        if (count === 0) continue;
+
+        // Fetch in pages
+        const pages = Math.ceil(Math.min(count, MAX_PER_TILE) / 50);
+        for (let p = 0; p < pages; p++) {
+          if (signal.aborted) break;
+
+          const resp = await fetch(
+            `/api/opencellid/in-area?bbox=${bbox}&limit=50&offset=${p * 50}`,
+            { signal }
+          );
+          const data = await resp.json();
+          const cells = data.cells || [];
+
+          for (const cell of cells) {
+            const uid = `${cell.mcc}-${cell.mnc}-${cell.lac}-${cell.cellid}`;
+            if (loadedCells.has(uid)) continue;
+            loadedCells.add(uid);
+
+            const radio = cell.radio || 'Unknown';
+            if (stats[radio] !== undefined) stats[radio]++;
+
+            const marker = L.marker([cell.lat, cell.lon], {
+              icon: towerIcon(radio),
+            });
+
+            marker.bindPopup(popupContent(cell), {
+              maxWidth: 280,
+              closeButton: true,
+            });
+
+            // Hover to open popup
+            marker.on('mouseover', function() { this.openPopup(); });
+
+            markers.addLayer(marker);
+            newCount++;
+          }
+
+          updateStats();
+        }
+      } catch (err) {
+        if (err.name !== 'AbortError') console.error('Fetch error:', err);
+      }
+    }
+
+    showLoading(false);
+    updateStats();
+  }
+
+  // ── Event listeners ──
+  let debounceTimer;
+  function debouncedLoad() {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(loadTowers, 600);
+  }
+
+  map.on('moveend', debouncedLoad);
+  map.on('zoomend', () => {
+    if (map.getZoom() < MIN_ZOOM) {
+      showZoomPrompt(true);
+    } else {
+      showZoomPrompt(false);
+    }
+    debouncedLoad();
+  });
+
+  // ── Initial zoom prompt ──
+  showZoomPrompt(true);
+
+  // Fly to Florida on load
+  map.setView([27.8, -81.8], 7);
+
+})();
+</script>
+</body>
+</html>
