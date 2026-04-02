@@ -74,6 +74,47 @@ app.get("/api/opencellid/in-area", async (req, res) => {
   }
 });
 
+// ── Transmission Grid Proxy ──
+const TRANSMISSION_URL =
+  "https://services2.arcgis.com/FiaPA4ga0iQKduv3/arcgis/rest/services/US_Electric_Power_Transmission_Lines/FeatureServer/0/query";
+
+app.get("/api/transmission-lines", async (req, res) => {
+  try {
+    const { bbox } = req.query;
+    if (!bbox) return res.status(400).json({ error: "bbox required (west,south,east,north)" });
+
+    const parts = String(bbox).split(",").map((v) => Number(v.trim()));
+    if (parts.length !== 4 || parts.some((v) => !Number.isFinite(v))) {
+      return res.status(400).json({ error: "Invalid bbox format" });
+    }
+    const [west, south, east, north] = parts;
+
+    const params = new URLSearchParams({
+      where: "1=1",
+      geometry: JSON.stringify({
+        xmin: west, ymin: south,
+        xmax: east, ymax: north,
+        spatialReference: { wkid: 4326 }
+      }),
+      geometryType: "esriGeometryEnvelope",
+      spatialRel: "esriSpatialRelIntersects",
+      outFields: "OWNER,VOLTAGE,VOLT_CLASS,STATUS,SUB_1,SUB_2",
+      outSR: "4326",
+      inSR: "4326",
+      f: "geojson",
+      resultRecordCount: "2000",
+    });
+
+    const response = await fetch(`${TRANSMISSION_URL}?${params}`, {
+      headers: { "User-Agent": "SkyWave-Tower-Map/1.0" }
+    });
+    const text = await response.text();
+    res.status(response.status).type("application/json").send(text);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get("*", (_req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });

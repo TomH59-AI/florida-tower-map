@@ -309,6 +309,79 @@
     color: var(--sky-dim);
     font-size: 14px;
   }
+
+  /* Transmission grid toggle */
+  #grid-toggle {
+    position: fixed;
+    top: 64px;
+    left: 20px;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(17, 24, 39, 0.94);
+    border: 1px solid var(--sky-border);
+    border-radius: 8px;
+    padding: 7px 14px;
+    cursor: pointer;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--sky-text);
+    backdrop-filter: blur(8px);
+    user-select: none;
+    transition: border-color 0.2s;
+  }
+  #grid-toggle:hover { border-color: var(--sky-green); }
+  #grid-toggle.active { border-color: #f59e0b; }
+  #grid-toggle .toggle-icon {
+    font-size: 14px;
+    line-height: 1;
+  }
+
+  /* Voltage legend */
+  #voltage-legend {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: rgba(17, 24, 39, 0.94);
+    border: 1px solid var(--sky-border);
+    border-radius: 10px;
+    padding: 14px 18px;
+    z-index: 1000;
+    font-size: 12px;
+    backdrop-filter: blur(8px);
+    display: none;
+  }
+  #voltage-legend.visible { display: block; }
+  #voltage-legend h4 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--sky-dim);
+    margin-bottom: 10px;
+  }
+  .voltage-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 5px;
+  }
+  .voltage-line {
+    width: 22px;
+    height: 3px;
+    border-radius: 2px;
+  }
+  .voltage-label { color: var(--sky-text); font-size: 11px; }
+
+  #grid-stats {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--sky-dim);
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--sky-border);
+  }
 </style>
 </head>
 <body>
@@ -384,6 +457,46 @@
     <div class="legend-marker" style="background:var(--cdma-color);border-color:var(--cdma-color)"></div>
     <span class="legend-label">CDMA</span>
   </div>
+</div>
+
+<!-- Transmission grid toggle -->
+<div id="grid-toggle" title="Toggle transmission grid overlay">
+  <span class="toggle-icon">&#9889;</span>
+  <span>GRID</span>
+</div>
+
+<!-- Voltage legend -->
+<div id="voltage-legend">
+  <h4>Transmission Grid</h4>
+  <div class="voltage-row">
+    <div class="voltage-line" style="background:#ef4444"></div>
+    <span class="voltage-label">735 kV+</span>
+  </div>
+  <div class="voltage-row">
+    <div class="voltage-line" style="background:#f97316"></div>
+    <span class="voltage-label">500 - 735 kV</span>
+  </div>
+  <div class="voltage-row">
+    <div class="voltage-line" style="background:#f59e0b"></div>
+    <span class="voltage-label">345 - 500 kV</span>
+  </div>
+  <div class="voltage-row">
+    <div class="voltage-line" style="background:#eab308"></div>
+    <span class="voltage-label">230 - 345 kV</span>
+  </div>
+  <div class="voltage-row">
+    <div class="voltage-line" style="background:#84cc16"></div>
+    <span class="voltage-label">115 - 230 kV</span>
+  </div>
+  <div class="voltage-row">
+    <div class="voltage-line" style="background:#22d3ee"></div>
+    <span class="voltage-label">69 - 115 kV</span>
+  </div>
+  <div class="voltage-row">
+    <div class="voltage-line" style="background:#64748b"></div>
+    <span class="voltage-label">Under 69 kV / Unknown</span>
+  </div>
+  <div id="grid-stats">Lines: <span id="grid-line-count">0</span></div>
 </div>
 
 <!-- Map -->
@@ -683,6 +796,133 @@
 
   // ── Initial zoom prompt ──
   showZoomPrompt(true);
+
+  // ── Transmission Grid Layer ──
+  const VOLTAGE_COLORS = [
+    { min: 735, color: '#ef4444', weight: 3.5 },
+    { min: 500, color: '#f97316', weight: 3.0 },
+    { min: 345, color: '#f59e0b', weight: 2.5 },
+    { min: 230, color: '#eab308', weight: 2.0 },
+    { min: 115, color: '#84cc16', weight: 1.5 },
+    { min: 69,  color: '#22d3ee', weight: 1.2 },
+    { min: 0,   color: '#64748b', weight: 1.0 },
+  ];
+
+  function voltageStyle(voltage) {
+    const v = Number(voltage) || 0;
+    for (const tier of VOLTAGE_COLORS) {
+      if (v >= tier.min) return { color: tier.color, weight: tier.weight };
+    }
+    return { color: '#64748b', weight: 1.0 };
+  }
+
+  let gridLayer = null;
+  let gridVisible = false;
+  let gridAbort = null;
+
+  function gridPopup(props) {
+    const v = props.VOLTAGE ? `${props.VOLTAGE} kV` : 'Unknown';
+    return `
+      <div class="popup-header">
+        <span class="popup-badge" style="background:#f59e0b;color:#000">GRID</span>
+        <span>Transmission Line</span>
+      </div>
+      <div class="popup-row"><span class="label">Owner</span><span class="value">${props.OWNER || '—'}</span></div>
+      <div class="popup-row"><span class="label">Voltage</span><span class="value">${v}</span></div>
+      <div class="popup-row"><span class="label">Class</span><span class="value">${props.VOLT_CLASS || '—'}</span></div>
+      <div class="popup-row"><span class="label">Status</span><span class="value">${props.STATUS || '—'}</span></div>
+      <div class="popup-row"><span class="label">Sub 1</span><span class="value">${props.SUB_1 || '—'}</span></div>
+      <div class="popup-row"><span class="label">Sub 2</span><span class="value">${props.SUB_2 || '—'}</span></div>
+    `;
+  }
+
+  async function loadTransmissionGrid() {
+    if (!gridVisible) return;
+    if (gridAbort) gridAbort.abort();
+    gridAbort = new AbortController();
+    const signal = gridAbort.signal;
+
+    const bounds = map.getBounds();
+    const bbox = [
+      bounds.getWest(), bounds.getSouth(),
+      bounds.getEast(), bounds.getNorth()
+    ].join(',');
+
+    showLoading(true);
+
+    try {
+      const resp = await fetch(`/api/transmission-lines?bbox=${bbox}`, { signal });
+      const geojson = await resp.json();
+
+      if (signal.aborted) return;
+
+      if (gridLayer) {
+        map.removeLayer(gridLayer);
+      }
+
+      gridLayer = L.geoJSON(geojson, {
+        style: function(feature) {
+          const s = voltageStyle(feature.properties.VOLTAGE);
+          return {
+            color: s.color,
+            weight: s.weight,
+            opacity: 0.8,
+            lineJoin: 'round',
+          };
+        },
+        onEachFeature: function(feature, layer) {
+          layer.bindPopup(gridPopup(feature.properties), {
+            maxWidth: 280,
+            closeButton: true,
+          });
+          layer.on('mouseover', function() {
+            this.setStyle({ weight: this.options.weight + 2, opacity: 1 });
+          });
+          layer.on('mouseout', function(e) {
+            gridLayer.resetStyle(e.target);
+          });
+        },
+      });
+
+      gridLayer.addTo(map);
+
+      const count = geojson.features ? geojson.features.length : 0;
+      document.getElementById('grid-line-count').textContent = count.toLocaleString();
+    } catch (err) {
+      if (err.name !== 'AbortError') console.error('Grid fetch error:', err);
+    }
+
+    showLoading(false);
+  }
+
+  // Toggle button
+  const gridToggleBtn = document.getElementById('grid-toggle');
+  const voltageLegend = document.getElementById('voltage-legend');
+
+  gridToggleBtn.addEventListener('click', function() {
+    gridVisible = !gridVisible;
+    gridToggleBtn.classList.toggle('active', gridVisible);
+    voltageLegend.classList.toggle('visible', gridVisible);
+
+    if (gridVisible) {
+      loadTransmissionGrid();
+    } else {
+      if (gridLayer) {
+        map.removeLayer(gridLayer);
+        gridLayer = null;
+      }
+      document.getElementById('grid-line-count').textContent = '0';
+    }
+  });
+
+  // Reload grid on pan/zoom
+  map.on('moveend', function() {
+    if (gridVisible) {
+      clearTimeout(gridDebounce);
+      gridDebounce = setTimeout(loadTransmissionGrid, 800);
+    }
+  });
+  let gridDebounce;
 
   // Fly to Florida on load
   map.setView([27.8, -81.8], 7);
