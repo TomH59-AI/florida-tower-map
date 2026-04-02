@@ -8,6 +8,7 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 const TOKEN = process.env.OPENCELLID_TOKEN || "";
+const PEERINGDB_KEY = process.env.PEERINGDB_API_KEY || "";
 const BASE = "https://opencellid.org";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -45,7 +46,75 @@ async function proxyOpenCellId(pathname, params) {
 }
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, hasToken: Boolean(TOKEN) });
+  res.json({ ok: true, hasToken: Boolean(TOKEN), hasPeeringDB: Boolean(PEERINGDB_KEY) });
+});
+
+// ── PeeringDB Proxy ──
+const PEERINGDB_BASE = "https://www.peeringdb.com/api";
+
+async function proxyPeeringDB(endpoint, params) {
+  const url = new URL(`${PEERINGDB_BASE}/${endpoint}`);
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== "") {
+      url.searchParams.set(key, String(value));
+    }
+  }
+  const headers = { "User-Agent": "SkyWave-Tower-Map/1.0" };
+  if (PEERINGDB_KEY) {
+    headers["Authorization"] = `Api-Key ${PEERINGDB_KEY}`;
+  }
+  const response = await fetch(url, { headers });
+  const text = await response.text();
+  return { ok: response.ok, status: response.status, body: text };
+}
+
+app.get("/api/peeringdb/facilities", async (req, res) => {
+  try {
+    const { state, country, lat, lng, radius } = req.query;
+    const params = { country: country || "US", status: "ok" };
+    if (state) params.state = state;
+    const result = await proxyPeeringDB("fac", params);
+    if (!result.ok) {
+      return res.status(result.status).type("application/json").send(result.body);
+    }
+
+    let data = JSON.parse(result.body);
+
+    // If lat/lng provided, filter by distance
+    if (lat && lng && radius) {
+      const centerLat = Number(lat);
+      const centerLng = Number(lng);
+      const maxMiles = Number(radius) || 50;
+      data.data = data.data.filter((f) => {
+        if (!f.latitude || !f.longitude) return false;
+        const dLat = (f.latitude - centerLat) * Math.PI / 180;
+        const dLon = (f.longitude - centerLng) * Math.PI / 180;
+        const a = Math.sin(dLat / 2) ** 2 +
+          Math.cos(centerLat * Math.PI / 180) * Math.cos(f.latitude * Math.PI / 180) *
+          Math.sin(dLon / 2) ** 2;
+        const miles = 3958.8 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        f._distance_mi = Math.round(miles * 100) / 100;
+        return miles <= maxMiles;
+      });
+      data.data.sort((a, b) => a._distance_mi - b._distance_mi);
+    }
+
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get("/api/peeringdb/exchanges", async (req, res) => {
+  try {
+    const { state, country } = req.query;
+    const params = { country: country || "US", status: "ok" };
+    if (state) params.state = state;
+    const result = await proxyPeeringDB("ix", params);
+    res.status(result.status).type("application/json").send(result.body);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 app.get("/api/opencellid/in-area-size", async (req, res) => {
